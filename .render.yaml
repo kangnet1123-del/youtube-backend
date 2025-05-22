@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: youtube-backend
+    env: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    branch: main
