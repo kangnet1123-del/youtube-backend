@@ -1,173 +1,213 @@
-all: lazy-extractors yt-dlp doc pypi-files
-clean: clean-test clean-dist
-clean-all: clean clean-cache
-completions: completion-bash completion-fish completion-zsh
-doc: README.md CONTRIBUTING.md CONTRIBUTORS issuetemplates supportedsites
-ot: offlinetest
-tar: yt-dlp.tar.gz
+MAIN_MAKEFILE=1
+include ffbuild/config.mak
 
-# Keep this list in sync with pyproject.toml includes/artifacts
-# intended use: when building a source distribution,
-# make pypi-files && python3 -m build -sn .
-pypi-files: AUTHORS Changelog.md LICENSE README.md README.txt supportedsites \
-            completions yt-dlp.1 pyproject.toml setup.cfg devscripts/* test/*
+vpath %.c    $(SRC_PATH)
+vpath %.cpp  $(SRC_PATH)
+vpath %.h    $(SRC_PATH)
+vpath %.inc  $(SRC_PATH)
+vpath %.m    $(SRC_PATH)
+vpath %.S    $(SRC_PATH)
+vpath %.asm  $(SRC_PATH)
+vpath %.rc   $(SRC_PATH)
+vpath %.v    $(SRC_PATH)
+vpath %.texi $(SRC_PATH)
+vpath %.cu   $(SRC_PATH)
+vpath %.ptx  $(SRC_PATH)
+vpath %.metal $(SRC_PATH)
+vpath %/fate_config.sh.template $(SRC_PATH)
 
-.PHONY: all clean clean-all clean-test clean-dist clean-cache \
-        completions completion-bash completion-fish completion-zsh \
-        doc issuetemplates supportedsites ot offlinetest codetest test \
-        tar pypi-files lazy-extractors install uninstall
+TESTTOOLS   = audiogen videogen rotozoom tiny_psnr tiny_ssim base64 audiomatch
+HOSTPROGS  := $(TESTTOOLS:%=tests/%) doc/print_options
 
-clean-test:
-	rm -rf test/testdata/sigs/player-*.js tmp/ *.annotations.xml *.aria2 *.description *.dump *.frag \
-	*.frag.aria2 *.frag.urls *.info.json *.live_chat.json *.meta *.part* *.tmp *.temp *.unknown_video *.ytdl \
-	*.3gp *.ape *.ass *.avi *.desktop *.f4v *.flac *.flv *.gif *.jpeg *.jpg *.lrc *.m4a *.m4v *.mhtml *.mkv *.mov *.mp3 *.mp4 \
-	*.mpg *.mpga *.oga *.ogg *.opus *.png *.sbv *.srt *.ssa *.swf *.tt *.ttml *.url *.vtt *.wav *.webloc *.webm *.webp
-clean-dist:
-	rm -rf yt-dlp.1.temp.md yt-dlp.1 README.txt MANIFEST build/ dist/ .coverage cover/ yt-dlp.tar.gz completions/ \
-	yt_dlp/extractor/lazy_extractors.py *.spec CONTRIBUTING.md.tmp yt-dlp yt-dlp.exe yt_dlp.egg-info/ AUTHORS
-clean-cache:
-	find . \( \
-		-type d -name ".*_cache" -o -type d -name __pycache__ -o -name "*.pyc" -o -name "*.class" \
-	\) -prune -exec rm -rf {} \;
+ALLFFLIBS = avcodec avdevice avfilter avformat avutil postproc swscale swresample
 
-completion-bash: completions/bash/yt-dlp
-completion-fish: completions/fish/yt-dlp.fish
-completion-zsh: completions/zsh/_yt-dlp
-lazy-extractors: yt_dlp/extractor/lazy_extractors.py
+# $(FFLIBS-yes) needs to be in linking order
+FFLIBS-$(CONFIG_AVDEVICE)   += avdevice
+FFLIBS-$(CONFIG_AVFILTER)   += avfilter
+FFLIBS-$(CONFIG_AVFORMAT)   += avformat
+FFLIBS-$(CONFIG_AVCODEC)    += avcodec
+FFLIBS-$(CONFIG_POSTPROC)   += postproc
+FFLIBS-$(CONFIG_SWRESAMPLE) += swresample
+FFLIBS-$(CONFIG_SWSCALE)    += swscale
 
-PREFIX ?= /usr/local
-BINDIR ?= $(PREFIX)/bin
-MANDIR ?= $(PREFIX)/man
-SHAREDIR ?= $(PREFIX)/share
-PYTHON ?= /usr/bin/env python3
-GNUTAR ?= tar
+FFLIBS := avutil
 
-# set markdown input format to "markdown-smart" for pandoc version 2+ and to "markdown" for pandoc prior to version 2
-PANDOC_VERSION_CMD = pandoc -v 2>/dev/null | head -n1 | cut -d' ' -f2 | head -c1
-PANDOC_VERSION != $(PANDOC_VERSION_CMD)
-PANDOC_VERSION ?= $(shell $(PANDOC_VERSION_CMD))
-MARKDOWN_CMD = if [ "$(PANDOC_VERSION)" = "1" -o "$(PANDOC_VERSION)" = "0" ]; then echo markdown; else echo markdown-smart; fi
-MARKDOWN != $(MARKDOWN_CMD)
-MARKDOWN ?= $(shell $(MARKDOWN_CMD))
+DATA_FILES := $(wildcard $(SRC_PATH)/presets/*.ffpreset) $(SRC_PATH)/doc/ffprobe.xsd
 
-install: lazy-extractors yt-dlp yt-dlp.1 completions
-	mkdir -p $(DESTDIR)$(BINDIR)
-	install -m755 yt-dlp $(DESTDIR)$(BINDIR)/yt-dlp
-	mkdir -p $(DESTDIR)$(MANDIR)/man1
-	install -m644 yt-dlp.1 $(DESTDIR)$(MANDIR)/man1/yt-dlp.1
-	mkdir -p $(DESTDIR)$(SHAREDIR)/bash-completion/completions
-	install -m644 completions/bash/yt-dlp $(DESTDIR)$(SHAREDIR)/bash-completion/completions/yt-dlp
-	mkdir -p $(DESTDIR)$(SHAREDIR)/zsh/site-functions
-	install -m644 completions/zsh/_yt-dlp $(DESTDIR)$(SHAREDIR)/zsh/site-functions/_yt-dlp
-	mkdir -p $(DESTDIR)$(SHAREDIR)/fish/vendor_completions.d
-	install -m644 completions/fish/yt-dlp.fish $(DESTDIR)$(SHAREDIR)/fish/vendor_completions.d/yt-dlp.fish
+SKIPHEADERS = compat/w32pthreads.h
 
-uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/yt-dlp
-	rm -f $(DESTDIR)$(MANDIR)/man1/yt-dlp.1
-	rm -f $(DESTDIR)$(SHAREDIR)/bash-completion/completions/yt-dlp
-	rm -f $(DESTDIR)$(SHAREDIR)/zsh/site-functions/_yt-dlp
-	rm -f $(DESTDIR)$(SHAREDIR)/fish/vendor_completions.d/yt-dlp.fish
+# first so "all" becomes default target
+all: all-yes
 
-codetest:
-	ruff check .
-	autopep8 --diff .
+include $(SRC_PATH)/tools/Makefile
+include $(SRC_PATH)/ffbuild/common.mak
 
-test:
-	$(PYTHON) -m pytest -Werror
-	$(MAKE) codetest
+FF_EXTRALIBS := $(FFEXTRALIBS)
+FF_DEP_LIBS  := $(DEP_LIBS)
+FF_STATIC_DEP_LIBS := $(STATIC_DEP_LIBS)
 
-offlinetest: codetest
-	$(PYTHON) -m pytest -Werror -m "not download"
+$(TOOLS): %$(EXESUF): %.o
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(filter-out $(FF_DEP_LIBS), $^) $(EXTRALIBS-$(*F)) $(EXTRALIBS) $(ELIBS)
 
-CODE_FOLDERS_CMD = find yt_dlp -type f -name '__init__.py' | sed 's,/__init__.py,,' | grep -v '/__' | sort
-CODE_FOLDERS != $(CODE_FOLDERS_CMD)
-CODE_FOLDERS ?= $(shell $(CODE_FOLDERS_CMD))
-CODE_FILES_CMD = for f in $(CODE_FOLDERS) ; do echo "$$f" | sed 's,$$,/*.py,' ; done
-CODE_FILES != $(CODE_FILES_CMD)
-CODE_FILES ?= $(shell $(CODE_FILES_CMD))
-yt-dlp: $(CODE_FILES)
-	mkdir -p zip
-	for d in $(CODE_FOLDERS) ; do \
-	  mkdir -p zip/$$d ;\
-	  cp -pPR $$d/*.py zip/$$d/ ;\
-	done
-	(cd zip && touch -t 200001010101 $(CODE_FILES))
-	mv zip/yt_dlp/__main__.py zip/
-	(cd zip && zip -q ../yt-dlp $(CODE_FILES) __main__.py)
-	rm -rf zip
-	echo '#!$(PYTHON)' > yt-dlp
-	cat yt-dlp.zip >> yt-dlp
-	rm yt-dlp.zip
-	chmod a+x yt-dlp
+target_dec_%_fuzzer$(EXESUF): target_dec_%_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-README.md: $(CODE_FILES) devscripts/make_readme.py
-	COLUMNS=80 $(PYTHON) yt_dlp/__main__.py --ignore-config --help | $(PYTHON) devscripts/make_readme.py
+target_enc_%_fuzzer$(EXESUF): target_enc_%_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-CONTRIBUTING.md: README.md devscripts/make_contributing.py
-	$(PYTHON) devscripts/make_contributing.py README.md CONTRIBUTING.md
+tools/target_bsf_%_fuzzer$(EXESUF): tools/target_bsf_%_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-issuetemplates: devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/1_broken_site.yml .github/ISSUE_TEMPLATE_tmpl/2_site_support_request.yml .github/ISSUE_TEMPLATE_tmpl/3_site_feature_request.yml .github/ISSUE_TEMPLATE_tmpl/4_bug_report.yml .github/ISSUE_TEMPLATE_tmpl/5_feature_request.yml yt_dlp/version.py
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/1_broken_site.yml .github/ISSUE_TEMPLATE/1_broken_site.yml
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/2_site_support_request.yml .github/ISSUE_TEMPLATE/2_site_support_request.yml
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/3_site_feature_request.yml .github/ISSUE_TEMPLATE/3_site_feature_request.yml
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/4_bug_report.yml .github/ISSUE_TEMPLATE/4_bug_report.yml
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/5_feature_request.yml .github/ISSUE_TEMPLATE/5_feature_request.yml
-	$(PYTHON) devscripts/make_issue_template.py .github/ISSUE_TEMPLATE_tmpl/6_question.yml .github/ISSUE_TEMPLATE/6_question.yml
+target_dem_%_fuzzer$(EXESUF): target_dem_%_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-supportedsites:
-	$(PYTHON) devscripts/make_supportedsites.py supportedsites.md
+tools/target_dem_fuzzer$(EXESUF): tools/target_dem_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-README.txt: README.md
-	pandoc -f $(MARKDOWN) -t plain README.md -o README.txt
+tools/target_io_dem_fuzzer$(EXESUF): tools/target_io_dem_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-yt-dlp.1: README.md devscripts/prepare_manpage.py
-	$(PYTHON) devscripts/prepare_manpage.py yt-dlp.1.temp.md
-	pandoc -s -f $(MARKDOWN) -t man yt-dlp.1.temp.md -o yt-dlp.1
-	rm -f yt-dlp.1.temp.md
+tools/target_sws_fuzzer$(EXESUF): tools/target_sws_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-completions/bash/yt-dlp: $(CODE_FILES) devscripts/bash-completion.in
-	mkdir -p completions/bash
-	$(PYTHON) devscripts/bash-completion.py
+tools/target_swr_fuzzer$(EXESUF): tools/target_swr_fuzzer.o $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
 
-completions/zsh/_yt-dlp: $(CODE_FILES) devscripts/zsh-completion.in
-	mkdir -p completions/zsh
-	$(PYTHON) devscripts/zsh-completion.py
+tools/enum_options$(EXESUF): ELIBS = $(FF_EXTRALIBS)
+tools/enum_options$(EXESUF): $(FF_DEP_LIBS)
+tools/enc_recon_frame_test$(EXESUF): $(FF_DEP_LIBS)
+tools/enc_recon_frame_test$(EXESUF): ELIBS = $(FF_EXTRALIBS)
+tools/scale_slice_test$(EXESUF): $(FF_DEP_LIBS)
+tools/scale_slice_test$(EXESUF): ELIBS = $(FF_EXTRALIBS)
+tools/sofa2wavs$(EXESUF): ELIBS = $(FF_EXTRALIBS)
+tools/uncoded_frame$(EXESUF): $(FF_DEP_LIBS)
+tools/uncoded_frame$(EXESUF): ELIBS = $(FF_EXTRALIBS)
+tools/target_dec_%_fuzzer$(EXESUF): $(FF_DEP_LIBS)
+tools/target_dem_%_fuzzer$(EXESUF): $(FF_DEP_LIBS)
 
-completions/fish/yt-dlp.fish: $(CODE_FILES) devscripts/fish-completion.in
-	mkdir -p completions/fish
-	$(PYTHON) devscripts/fish-completion.py
+CONFIGURABLE_COMPONENTS =                                           \
+    $(wildcard $(FFLIBS:%=$(SRC_PATH)/lib%/all*.c))                 \
+    $(SRC_PATH)/libavcodec/bitstream_filters.c                      \
+    $(SRC_PATH)/libavcodec/hwaccels.h                               \
+    $(SRC_PATH)/libavcodec/parsers.c                                \
+    $(SRC_PATH)/libavformat/protocols.c                             \
 
-_EXTRACTOR_FILES_CMD = find yt_dlp/extractor -name '*.py' -and -not -name 'lazy_extractors.py'
-_EXTRACTOR_FILES != $(_EXTRACTOR_FILES_CMD)
-_EXTRACTOR_FILES ?= $(shell $(_EXTRACTOR_FILES_CMD))
-yt_dlp/extractor/lazy_extractors.py: devscripts/make_lazy_extractors.py devscripts/lazy_load_template.py $(_EXTRACTOR_FILES)
-	$(PYTHON) devscripts/make_lazy_extractors.py $@
+config_components.h: ffbuild/.config
+ffbuild/.config: $(CONFIGURABLE_COMPONENTS)
+	@-tput bold 2>/dev/null
+	@-printf '\nWARNING: $(?) newer than config_components.h, rerun configure\n\n'
+	@-tput sgr0 2>/dev/null
 
-yt-dlp.tar.gz: all
-	@$(GNUTAR) -czf yt-dlp.tar.gz --transform "s|^|yt-dlp/|" --owner 0 --group 0 \
-		--exclude '*.DS_Store' \
-		--exclude '*.kate-swp' \
-		--exclude '*.pyc' \
-		--exclude '*.pyo' \
-		--exclude '*~' \
-		--exclude '__pycache__' \
-		--exclude '.*_cache' \
-		--exclude '.git' \
-		-- \
-		README.md supportedsites.md Changelog.md LICENSE \
-		CONTRIBUTING.md Collaborators.md CONTRIBUTORS AUTHORS \
-		Makefile yt-dlp.1 README.txt completions .gitignore \
-		setup.cfg yt-dlp yt_dlp pyproject.toml devscripts test
+SUBDIR_VARS := CLEANFILES FFLIBS HOSTPROGS TESTPROGS TOOLS               \
+               HEADERS ARCH_HEADERS BUILT_HEADERS SKIPHEADERS            \
+               ARMV5TE-OBJS ARMV6-OBJS ARMV8-OBJS VFP-OBJS NEON-OBJS     \
+               ALTIVEC-OBJS VSX-OBJS MMX-OBJS X86ASM-OBJS                \
+               MIPSFPU-OBJS MIPSDSPR2-OBJS MIPSDSP-OBJS MSA-OBJS         \
+               MMI-OBJS LSX-OBJS LASX-OBJS RV-OBJS RVV-OBJS RVVB-OBJS    \
+               OBJS SLIBOBJS SHLIBOBJS STLIBOBJS HOSTOBJS TESTOBJS
 
-AUTHORS: Changelog.md
-	@if [ -d '.git' ] && command -v git > /dev/null ; then \
-	  echo 'Generating $@ from git commit history' ; \
-	  git shortlog -s -n HEAD | cut -f2 | sort > $@ ; \
-	fi
+define RESET
+$(1) :=
+$(1)-yes :=
+endef
 
-CONTRIBUTORS: Changelog.md
-	@if [ -d '.git' ] && command -v git > /dev/null ; then \
-	  echo 'Updating $@ from git commit history' ; \
-	  $(PYTHON) devscripts/make_changelog.py -v -c > /dev/null ; \
-	fi
+define DOSUBDIR
+$(foreach V,$(SUBDIR_VARS),$(eval $(call RESET,$(V))))
+SUBDIR := $(1)/
+include $(SRC_PATH)/$(1)/Makefile
+-include $(SRC_PATH)/$(1)/$(ARCH)/Makefile
+-include $(SRC_PATH)/$(1)/$(INTRINSICS)/Makefile
+include $(SRC_PATH)/ffbuild/library.mak
+endef
+
+$(foreach D,$(FFLIBS),$(eval $(call DOSUBDIR,lib$(D))))
+
+include $(SRC_PATH)/fftools/Makefile
+include $(SRC_PATH)/doc/Makefile
+include $(SRC_PATH)/doc/examples/Makefile
+
+$(ALLFFLIBS:%=lib%/version.o): libavutil/ffversion.h
+
+$(PROGS): %$(PROGSSUF)$(EXESUF): %$(PROGSSUF)_g$(EXESUF)
+ifeq ($(STRIPTYPE),direct)
+	$(STRIP) -o $@ $<
+else
+	$(RM) $@
+	$(CP) $< $@
+	$(STRIP) $@
+endif
+
+%$(PROGSSUF)_g$(EXESUF): $(FF_DEP_LIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(OBJS-$*) $(FF_EXTRALIBS)
+
+VERSION_SH  = $(SRC_PATH)/ffbuild/version.sh
+ifeq ($(VERSION_TRACKING),yes)
+GIT_LOG     = $(SRC_PATH)/.git/logs/HEAD
+endif
+
+.version: $(wildcard $(GIT_LOG)) $(VERSION_SH) ffbuild/config.mak
+.version: M=@
+
+ifneq ($(VERSION_TRACKING),yes)
+libavutil/ffversion.h .version: REVISION=unknown
+endif
+libavutil/ffversion.h .version:
+	$(M)revision=$(REVISION) $(VERSION_SH) $(SRC_PATH) libavutil/ffversion.h $(EXTRA_VERSION)
+	$(Q)touch .version
+
+# force version.sh to run whenever version might have changed
+-include .version
+
+install: install-libs install-headers
+
+install-libs: install-libs-yes
+
+install-data: $(DATA_FILES)
+	$(Q)mkdir -p "$(DATADIR)"
+	$(INSTALL) -m 644 $(DATA_FILES) "$(DATADIR)"
+
+uninstall: uninstall-data uninstall-headers uninstall-libs uninstall-pkgconfig
+
+uninstall-data:
+	$(RM) -r "$(DATADIR)"
+
+clean::
+	$(RM) $(CLEANSUFFIXES)
+	$(RM) $(addprefix compat/,$(CLEANSUFFIXES)) $(addprefix compat/*/,$(CLEANSUFFIXES)) $(addprefix compat/*/*/,$(CLEANSUFFIXES))
+	$(RM) -r coverage-html
+	$(RM) -rf coverage.info coverage.info.in lcov
+
+distclean:: clean
+	$(RM) .version config.asm config.h config_components.h mapfile  \
+		ffbuild/.config ffbuild/config.* libavutil/avconfig.h \
+		version.h libavutil/ffversion.h libavcodec/codec_names.h \
+		libavcodec/bsf_list.c libavformat/protocol_list.c \
+		libavcodec/codec_list.c libavcodec/parser_list.c \
+		libavfilter/filter_list.c libavdevice/indev_list.c libavdevice/outdev_list.c \
+		libavformat/muxer_list.c libavformat/demuxer_list.c
+ifeq ($(SRC_LINK),src)
+	$(RM) src
+endif
+	$(RM) -rf doc/examples/pc-uninstalled
+
+config:
+	$(SRC_PATH)/configure $(value FFMPEG_CONFIGURATION)
+
+build: all alltools examples testprogs
+check: all alltools examples testprogs fate
+
+include $(SRC_PATH)/tests/Makefile
+
+$(sort $(OUTDIRS)):
+	$(Q)mkdir -p $@
+
+# Dummy rule to stop make trying to rebuild removed or renamed headers
+%.h:
+	@:
+
+# Disable suffix rules.  Most of the builtin rules are suffix rules,
+# so this saves some time on slow systems.
+.SUFFIXES:
+
+.PHONY: all all-yes alltools build check config testprogs
+.PHONY: *clean install* uninstall*
